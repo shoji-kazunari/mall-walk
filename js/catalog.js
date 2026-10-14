@@ -1,7 +1,7 @@
 // 売り場と、試作用の架空の商品。実在の商品・メーカーではない。
 // 本物の商品データ（楽天API）に差し替えるときは buildCatalog の戻り値を同じ形にそろえる。
 
-export const PRODUCTS_PER_SECTION = 64; // 1売り場=1枚のテクスチャ(8x8)に収まる数
+export const PRODUCTS_PER_SECTION = 40; // 1売り場=1枚のテクスチャ(8x5)に収まる数
 
 export const SECTIONS = [
   {

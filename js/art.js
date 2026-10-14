@@ -2,8 +2,10 @@
 import { SECTIONS, PRODUCTS_PER_SECTION } from './catalog.js';
 
 export const FONT = '"Hiragino Maru Gothic ProN", "Hiragino Sans", "Yu Gothic", "Meiryo", "IPAGothic", sans-serif';
-export const ATLAS_GRID = 8;
-const TILE = 128;
+// 1売り場ぶんの商品を横8×縦5に並べて1枚のテクスチャにする
+export const ATLAS_COLS = 8;
+export const ATLAS_ROWS = 5;
+const TILE = 192;
 
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
@@ -184,7 +186,7 @@ function wrapLines(ctx, text, maxWidth, maxLines) {
 
 // 1つの商品パッケージを (ox, oy) から一辺 s の正方形に描く
 export function drawProduct(ctx, p, ox, oy, s) {
-  const k = s / TILE;
+  const k = s / 128; // レイアウトは一辺128の正方形を基準に書いてある
   const a = p.art;
   ctx.save();
   ctx.translate(ox, oy);
@@ -207,13 +209,14 @@ export function drawProduct(ctx, p, ox, oy, s) {
   ctx.restore();
 }
 
-// 売り場ひとつ分の商品を8x8に並べた1枚のテクスチャ用canvas
+// 売り場ひとつ分の商品を並べた1枚のテクスチャ用canvas
 export function makeAtlas(products) {
   const c = document.createElement('canvas');
-  c.width = c.height = TILE * ATLAS_GRID;
+  c.width = TILE * ATLAS_COLS;
+  c.height = TILE * ATLAS_ROWS;
   const ctx = c.getContext('2d');
   for (let i = 0; i < PRODUCTS_PER_SECTION; i++) {
-    drawProduct(ctx, products[i], (i % ATLAS_GRID) * TILE, Math.floor(i / ATLAS_GRID) * TILE, TILE);
+    drawProduct(ctx, products[i], (i % ATLAS_COLS) * TILE, Math.floor(i / ATLAS_COLS) * TILE, TILE);
   }
   return c;
 }

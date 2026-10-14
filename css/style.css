@@ -111,6 +111,26 @@ html, body {
   transform: translate(-50%, -50%);
 }
 
+#buttons {
+  position: fixed;
+  right: 16px;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+button.chip {
+  padding: 10px 16px;
+  min-width: 104px;
+  font-size: 14px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--ink);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+button.chip:active { transform: translateY(1px); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15); }
+button.chip.off { color: var(--sub); }
+
 /* ---- 入店画面 ---- */
 #start, #panel {
   position: fixed;

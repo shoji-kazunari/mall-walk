@@ -1,11 +1,16 @@
 import * as THREE from 'three';
 import { SECTIONS, PRODUCTS_PER_SECTION, buildCatalog } from './catalog.js';
 import { makeRng, todaySeed } from './rng.js';
-import { buildWorld, sectionAt, HALL } from './world.js';
+import { buildWorld, sectionAt, HALL, GONDOLA } from './world.js';
 import { Controls } from './controls.js';
 import { drawProduct } from './art.js';
+import { makeAvatar } from './avatar.js';
+import { Bgm } from './audio.js';
 
-const EYE = 1.6;
+const EYE = 1.35; // 子どものころの目線。棚を少し見上げるくらい
+const BOB = 0.008; // 歩くときの上下の揺れ（大きいと酔う）
+const TPS_DIST = 3.0; // 三人称のときのカメラと自分の距離
+const TPS_HEIGHT = 2.5; // 三人称のカメラの高さ。棚(2.05m)より上から見下ろす
 const RADIUS = 0.3;
 const WALK = 1.8;
 const RUN = 4.5;
@@ -35,8 +40,13 @@ const rng = makeRng(seed);
 const catalog = buildCatalog(rng);
 const world = buildWorld(scene, renderer, catalog, rng);
 
-const player = { x: 0, z: HALL.halfL - 4, bob: 0 };
+const player = { x: 0, z: HALL.halfL - 4, bob: 0, walk: 0 };
 const controls = new Controls(canvas, { onPick: pick });
+const avatar = makeAvatar();
+avatar.visible = false;
+scene.add(avatar);
+const bgm = new Bgm();
+let tps = false;
 
 // ---- 当たり判定 ----
 function blocked(x, z) {
@@ -48,8 +58,20 @@ function blocked(x, z) {
   return false;
 }
 
+// 三人称のカメラが柱や壁にめり込まないよう、自分からカメラへの線上で手前に寄せる
+function camBlocked(x, z, y) {
+  const b = world.bounds, r = 0.2;
+  if (x < b.x1 + r || x > b.x2 - r || z < b.z1 + r || z > b.z2 - r) return true;
+  for (const c of world.colliders) {
+    if (!c.tall && y > GONDOLA.height + 0.15) continue;
+    if (x > c.x1 - r && x < c.x2 + r && z > c.z1 - r && z < c.z2 + r) return true;
+  }
+  return false;
+}
+
 // ---- 手に取る ----
 const raycaster = new THREE.Raycaster();
+const head = new THREE.Vector3();
 const ndc = new THREE.Vector2();
 let panelOpen = false;
 let resumeLock = false;
@@ -61,7 +83,8 @@ function pick(point) {
   raycaster.far = 40;
   const hit = raycaster.intersectObjects(world.productMeshes, false)[0];
   if (!hit) return;
-  if (hit.distance > REACH) {
+  head.set(player.x, EYE, player.z);
+  if (hit.point.distanceTo(head) > REACH) {
     toast('もう少し近づくと、手に取って見られます');
     return;
   }
@@ -169,9 +192,29 @@ const d = new Date();
 $('today').textContent = `${d.getMonth() + 1}月${d.getDate()}日の品ぞろえ：${SECTIONS.length}売り場・${SECTIONS.length * PRODUCTS_PER_SECTION}種類・棚に${world.productCount.toLocaleString('ja-JP')}個`;
 $('howto').innerHTML = isTouch
   ? '画面の<b>左側をなぞる</b>と歩く／<b>右側をなぞる</b>と見回す<br>近くの商品を<b>タップ</b>すると手に取れます'
-  : '<b>WASD・矢印キー</b>で歩く（Shiftで早歩き）／<b>マウス</b>で見回す<br>近くの商品を<b>クリック</b>すると手に取れます';
+  : '<b>WASD・矢印キー</b>で歩く（Shiftで早歩き）／<b>マウス</b>で見回す<br>近くの商品を<b>クリック</b>すると手に取れます<br><b>V</b>で視点の切りかえ／<b>M</b>でBGMのオン・オフ';
+
+function toggleView() {
+  tps = !tps;
+  avatar.visible = tps;
+  $('btn-view').textContent = tps ? '三人称' : '一人称';
+  toast(tps ? '三人称の視点' : '一人称の視点');
+}
+function toggleBgm() {
+  const on = bgm.toggle();
+  $('btn-bgm').textContent = on ? 'BGM オン' : 'BGM オフ';
+  $('btn-bgm').classList.toggle('off', !on);
+}
+$('btn-view').addEventListener('click', toggleView);
+$('btn-bgm').addEventListener('click', toggleBgm);
+addEventListener('keydown', (e) => {
+  if (!controls.enabled) return;
+  if (e.code === 'KeyV') toggleView();
+  if (e.code === 'KeyM') toggleBgm();
+});
 
 $('enter').addEventListener('click', () => {
+  bgm.start();
   start.classList.remove('on');
   $('enter').textContent = 'つづける';
   controls.enabled = true;
@@ -192,6 +235,24 @@ addEventListener('resize', () => {
   camera.updateProjectionMatrix();
 });
 
+// 自分の後ろ上から見下ろす。上下の見回しはカメラの高さで表す
+function placeTpsCamera() {
+  avatar.position.set(player.x, 0, player.z);
+  avatar.rotation.y = controls.yaw;
+  avatar.userData.animate(player.bob, player.walk);
+  const sy = Math.sin(controls.yaw), cy = Math.cos(controls.yaw);
+  const y = Math.max(1.2, Math.min(4.5, TPS_HEIGHT - controls.pitch * 2));
+  let dist = TPS_DIST;
+  for (let d = 0.3; d <= TPS_DIST; d += 0.1) {
+    if (camBlocked(player.x + sy * d, player.z + cy * d, y)) {
+      dist = Math.max(0.3, d - 0.2);
+      break;
+    }
+  }
+  camera.position.set(player.x + sy * dist, y, player.z + cy * dist);
+  camera.lookAt(player.x - sy * 2.5, 1.0 + controls.pitch * 2.5, player.z - cy * 2.5);
+}
+
 // ---- ループ ----
 let last = performance.now();
 let lastPlace = null;
@@ -209,9 +270,13 @@ function frame(now) {
     if (dz && !blocked(player.x, player.z + dz)) player.z += dz;
     const moving = Math.hypot(dx, dz);
     player.bob = moving ? player.bob + moving * 5.5 : player.bob * 0.9;
+    player.walk += ((moving > 0 ? 1 : 0) - player.walk) * Math.min(1, dt * 10);
   }
-  camera.position.set(player.x, EYE + Math.sin(player.bob) * 0.025, player.z);
-  camera.rotation.set(controls.pitch, controls.yaw, 0, 'YXZ');
+  if (tps) placeTpsCamera();
+  else {
+    camera.position.set(player.x, EYE + Math.sin(player.bob) * BOB, player.z);
+    camera.rotation.set(controls.pitch, controls.yaw, 0, 'YXZ');
+  }
 
   const place = sectionAt(player.x, player.z);
   if (place !== lastPlace) {
@@ -225,4 +290,4 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-window.__mall = { camera, controls, player, world, catalog, openPanel };
+window.__mall = { camera, controls, player, world, catalog, openPanel, bgm };

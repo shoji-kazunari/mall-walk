@@ -2,24 +2,28 @@
 // 入口が +z 側、奥が -z 側。中央を貫く広い通り（メインどおり）の左右に売り場が5つずつ並ぶ。
 import * as THREE from 'three';
 import { SECTIONS, PRODUCTS_PER_SECTION } from './catalog.js';
-import { makeAtlas, makeSignCanvas, ATLAS_GRID } from './art.js';
+import { makeAtlas, makeSignCanvas, ATLAS_COLS, ATLAS_ROWS } from './art.js';
 
 export const HALL = {
-  halfW: 46,        // 側壁の x
+  halfW: 42,        // 側壁の x
   halfL: 66,        // 入口と奥の壁の z
   height: 10,       // 天井の高さ。見上げたときの広さはここで決まる
-  prom: 5,          // メインどおりの半幅
+  prom: 3,          // メインどおりの半幅
   secTop: 54,       // ここより入口側はエントランス広場
   secPitch: 23.2,   // 売り場ひとつの奥行き
   perSide: 5,
 };
 
-const GONDOLA = { depth: 1.2, height: 1.45, levels: [0.12, 0.56, 1.0], maxItemH: 0.38 };
+// 棚は子どもの目線より少し高い2m。見上げる感じが売り場の楽しさになる
+export const GONDOLA = { depth: 1.2, height: 2.05, levels: [0.12, 0.6, 1.08, 1.56], maxItemH: 0.44 };
 const WALL_SHELF = { depth: 0.6, height: 3.1, levels: [0.12, 0.62, 1.12, 1.62, 2.12, 2.62], maxItemH: 0.44 };
-const RUNS = [[7.5, 22], [25, 39.5]]; // 売り場内の棚の列（|x| の範囲）。間が横の通路
+const RUNS = [[5.5, 20], [23, 37.5]]; // 売り場内の棚の列（|x| の範囲）。間が横の通路
 const ROWS = 5;
-const ROW_PITCH = 3.6;
-const PILLAR_X = [6.2, 23.5, 42.5];
+const ROW_PITCH = 4.0; // 棚の奥行き1.2m＋通路2.8m
+const PILLAR_X = [4.2, 21.5, 39.5];
+const SIZE_SCALE = 1.35; // 商品の大きさ。棚の前を歩きながらでも絵柄と名前が読める大きさにする
+const ITEM_GAP = 0.06;
+const GROUP_GAP = 0.16;
 
 export function sectionRect(si) {
   const side = si < HALL.perSide ? -1 : 1;
@@ -46,10 +50,22 @@ function makeProductMaterial(texture) {
   mat.onBeforeCompile = (shader) => {
     shader.vertexShader = 'attribute vec2 aTile;\n' + shader.vertexShader.replace(
       '#include <uv_vertex>',
-      `#include <uv_vertex>\n  vMapUv = vMapUv * ${(1 / ATLAS_GRID).toFixed(6)} + aTile;`,
+      `#include <uv_vertex>\n  vMapUv = vMapUv * vec2(${(1 / ATLAS_COLS).toFixed(6)}, ${(1 / ATLAS_ROWS).toFixed(6)}) + aTile;`,
     );
   };
   return mat;
+}
+
+// 底が y=0 の箱。パッケージの絵は正面(+z)だけに貼り、ほかの面は地の色1点を引き伸ばす
+function productBox() {
+  const geo = new THREE.BoxGeometry(1, 1, 1);
+  geo.translate(0, 0.5, 0);
+  const uv = geo.attributes.uv;
+  for (let v = 0; v < uv.count; v++) {
+    if (v >= 16 && v < 20) continue; // 面の順は +x, -x, +y, -y, +z, -z。各4頂点
+    uv.setXY(v, 0.03, 0.3);
+  }
+  return geo;
 }
 
 class ProductLayer {
@@ -70,8 +86,7 @@ class ProductLayer {
       const tex = new THREE.CanvasTexture(makeAtlas(catalog[si]));
       tex.colorSpace = THREE.SRGBColorSpace;
       tex.anisotropy = Math.min(8, maxAniso);
-      const geo = new THREE.BoxGeometry(1, 1, 1);
-      geo.translate(0, 0.5, 0);
+      const geo = productBox();
       const tiles = new Float32Array(items.length * 2);
       const mesh = new THREE.InstancedMesh(geo, makeProductMaterial(tex), items.length);
       const productOf = new Uint8Array(items.length);
@@ -82,8 +97,8 @@ class ProductLayer {
         m.compose(pos, q, scl);
         mesh.setMatrixAt(i, m);
         // テクスチャは上から下へ並べて描いてあるが、UVのvは下が0なので行を反転させる
-        tiles[i * 2] = (it.pi % ATLAS_GRID) / ATLAS_GRID;
-        tiles[i * 2 + 1] = (ATLAS_GRID - 1 - Math.floor(it.pi / ATLAS_GRID)) / ATLAS_GRID;
+        tiles[i * 2] = (it.pi % ATLAS_COLS) / ATLAS_COLS;
+        tiles[i * 2 + 1] = (ATLAS_ROWS - 1 - Math.floor(it.pi / ATLAS_COLS)) / ATLAS_ROWS;
         productOf[i] = it.pi;
       });
       geo.setAttribute('aTile', new THREE.InstancedBufferAttribute(tiles, 2));
@@ -119,20 +134,20 @@ class FixtureLayer {
   }
 }
 
-// 1段の棚に、左端から商品を詰めていく。同じ商品を2〜3個ずつ並べると売り場らしくなる
+// 1段の棚に、左端から商品を並べていく。同じ商品を1〜2個ずつ、少し間を空けて置く
 function fillShelf(rng, layer, si, catalog, from, to, place, maxH, maxD) {
   let cur = from;
   while (cur < to) {
     const pi = rng.int(0, PRODUCTS_PER_SECTION - 1);
     const p = catalog[si][pi];
-    const w = p.size.w, h = Math.min(p.size.h, maxH), d = Math.min(p.size.d * 2.2, maxD);
-    const facings = rng.int(1, 3);
+    const w = p.size.w * SIZE_SCALE, h = Math.min(p.size.h * SIZE_SCALE, maxH), d = Math.min(p.size.d * 2.2, maxD);
+    const facings = rng.int(1, 2);
     for (let f = 0; f < facings; f++) {
       if (cur + w > to) return;
       place(pi, cur + w / 2, w, h, d);
-      cur += w + 0.025;
+      cur += w + ITEM_GAP;
     }
-    cur += 0.02;
+    cur += GROUP_GAP;
   }
 }
 
@@ -247,7 +262,7 @@ export function buildWorld(scene, renderer, catalog, rng) {
       const x = s * px;
       fx.box(x, height / 2, z, 0.8, height, 0.8, '#f7f5f1');
       fx.box(x, 2.4, z, 0.84, 0.3, 0.84, '#c9ced6');
-      colliders.push({ x1: x - 0.4, z1: z - 0.4, x2: x + 0.4, z2: z + 0.4 });
+      colliders.push({ x1: x - 0.4, z1: z - 0.4, x2: x + 0.4, z2: z + 0.4, tall: true });
     }
   }
 
@@ -265,7 +280,7 @@ export function buildWorld(scene, renderer, catalog, rng) {
         fx.box(xm, GONDOLA.height / 2, zc, len, GONDOLA.height, 0.05, '#f1efe9');
         GONDOLA.levels.slice(1).forEach((y) => fx.box(xm, y - 0.0125, zc, len, 0.025, GONDOLA.depth, '#dde1e6'));
         fx.box(xm, GONDOLA.height + 0.01, zc, len, 0.02, GONDOLA.depth * 0.5, '#dde1e6');
-        for (const ex of [x1, x2]) fx.box(ex, 0.8, zc, 0.05, 1.6, GONDOLA.depth + 0.04, sec.color);
+        for (const ex of [x1, x2]) fx.box(ex, GONDOLA.height / 2, zc, 0.05, GONDOLA.height, GONDOLA.depth + 0.04, sec.color);
         colliders.push({ x1: x1 - 0.03, z1: zc - hd - 0.02, x2: x2 + 0.03, z2: zc + hd + 0.02 });
         minimap.gondolas.push({ x1, z1: zc - hd, x2, z2: zc + hd, si });
 
@@ -311,27 +326,27 @@ export function buildWorld(scene, renderer, catalog, rng) {
 
     // 吊り看板。遠くからでも売り場がわかるよう高く大きく
     const big = signMesh(sec.name, sec.color, 7, 1.75);
-    big.position.set(side * 23.5, 5.6, r.cz);
+    big.position.set(side * 21.5, 5.6, r.cz);
     scene.add(big);
-    for (const dx of [-3, 3]) fx.box(side * 23.5 + dx, (5.6 + 0.875 + height) / 2, r.cz, 0.03, height - 5.6 - 0.875, 0.03, '#888');
+    for (const dx of [-3, 3]) fx.box(side * 21.5 + dx, (5.6 + 0.875 + height) / 2, r.cz, 0.03, height - 5.6 - 0.875, 0.03, '#888');
     // メインどおりから横を向いたときに見える看板
     const side2 = signMesh(sec.name, sec.color, 5, 1.0);
-    side2.position.set(side * 7.4, 2.4, r.cz);
+    side2.position.set(side * 5.5, GONDOLA.height + 0.75, r.cz);
     side2.rotation.y = side > 0 ? -Math.PI / 2 : Math.PI / 2;
     scene.add(side2);
-    fx.box(side * 7.4, 1.75, r.cz, 0.06, 0.3, 0.06, '#888');
+    fx.box(side * 5.5, GONDOLA.height + 0.12, r.cz, 0.06, 0.25, 0.06, '#888');
   });
 
   // ---- メインどおりの島陳列。左右の売り場から目玉を集めて山積みにする ----
   for (let k = 0; k < HALL.perSide; k++) {
     const cz = HALL.secTop - HALL.secPitch * (k + 0.5);
     const sis = [k, k + HALL.perSide];
-    const T = 2.4, TH = 0.5;
+    const T = 2.0, TH = 0.5;
     fx.box(0, TH / 2, cz, T, TH, T, '#ffffff');
     fx.box(0, 0.08, cz, T + 0.06, 0.16, T + 0.06, SECTIONS[sis[0]].color);
-    colliders.push({ x1: -T / 2 - 0.05, z1: cz - T / 2 - 0.05, x2: T / 2 + 0.05, z2: cz + T / 2 + 0.05 });
+    colliders.push({ x1: -T / 2 - 0.05, z1: cz - T / 2 - 0.05, x2: T / 2 + 0.05, z2: cz + T / 2 + 0.05, tall: true });
     minimap.islands.push({ x: 0, z: cz, size: T });
-    const tiers = [[3, 0.72, 0.32], [2, 0.6, 0.3], [1, 0.5, 0.28]];
+    const tiers = [[3, 0.62, 0.34], [2, 0.54, 0.32], [1, 0.46, 0.3]];
     let y = TH;
     tiers.forEach(([n, cell, h]) => {
       for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
