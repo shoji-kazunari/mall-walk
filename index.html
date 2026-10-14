@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>モールあるき</title>
+  <meta name="description" content="広いおもちゃ売り場を歩いて、棚の商品を眺めるだけのウィンドウショッピング。">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.min.js" } }
+  </script>
+</head>
+<body>
+  <canvas id="view"></canvas>
+
+  <div id="where" class="hud"></div>
+  <canvas id="map" class="hud"></canvas>
+  <div id="crosshair"></div>
+  <div id="toast"></div>
+  <div id="joy"><div id="joy-knob"></div></div>
+
+  <div id="start" class="on">
+    <div class="card">
+      <p class="eyebrow">モールあるき 試作版</p>
+      <h1>おもちゃのひろば</h1>
+      <p id="today" class="today"></p>
+      <p id="howto" class="howto"></p>
+      <button id="enter" type="button">おみせにはいる</button>
+      <p class="note">並んでいる商品は、試作用の架空のものです。</p>
+    </div>
+  </div>
+
+  <div id="panel">
+    <div class="sheet">
+      <canvas id="panel-art" width="512" height="512"></canvas>
+      <div class="info">
+        <span id="panel-section" class="tag"></span>
+        <h2 id="panel-name"></h2>
+        <p class="maker"><span id="panel-maker"></span>・<span id="panel-age"></span></p>
+        <p id="panel-price" class="price"></p>
+        <p id="panel-desc" class="desc"></p>
+        <p class="note">試作用の架空の商品です。本物の商品につなぐと、ここから商品ページを見に行けるようになります。</p>
+        <button id="panel-close" type="button">たなにもどす</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
