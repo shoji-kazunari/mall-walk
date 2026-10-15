@@ -12,8 +12,8 @@ const BOB = 0.008; // 歩くときの上下の揺れ（大きいと酔う）
 const TPS_DIST = 3.0; // 三人称のときのカメラと自分の距離
 const TPS_HEIGHT = 2.5; // 三人称のカメラの高さ。棚(2.05m)より上から見下ろす
 const RADIUS = 0.3;
-const WALK = 1.8;
-const RUN = 4.5;
+const WALK = 2.7;
+const RUN = 6.5;
 const REACH = 4.5; // 手に取れる距離
 
 const $ = (id) => document.getElementById(id);
@@ -25,11 +25,11 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, isTouch ? 1.5 : 2));
 renderer.setSize(innerWidth, innerHeight);
 
 const scene = new THREE.Scene();
-const BG = '#f3efe8';
+const BG = '#f2f2f0';
 scene.background = new THREE.Color(BG);
-scene.fog = new THREE.Fog(BG, 30, 150);
-scene.add(new THREE.HemisphereLight('#ffffff', '#cdbfa8', 2.2));
-const sun = new THREE.DirectionalLight('#fff6e8', 1.1);
+scene.fog = new THREE.Fog(BG, 25, 120);
+scene.add(new THREE.HemisphereLight('#ffffff', '#d6d4cf', 2.3));
+const sun = new THREE.DirectionalLight('#ffffff', 1.0);
 sun.position.set(0.4, 1, 0.3);
 scene.add(sun);
 
@@ -81,15 +81,15 @@ function pick(point) {
   else ndc.set(0, 0);
   raycaster.setFromCamera(ndc, camera);
   raycaster.far = 40;
-  const hit = raycaster.intersectObjects(world.productMeshes, false)[0];
+  const hit = raycaster.intersectObjects(world.pickables, false)[0];
   if (!hit) return;
   head.set(player.x, EYE, player.z);
   if (hit.point.distanceTo(head) > REACH) {
     toast('もう少し近づくと、手に取って見られます');
     return;
   }
-  const mesh = hit.object;
-  openPanel(catalog[mesh.userData.section][mesh.userData.productOf[hit.instanceId]]);
+  const [si, pi] = hit.object.userData.productAt(hit.instanceId);
+  openPanel(catalog[si][pi]);
 }
 
 const panelArt = $('panel-art');
@@ -241,7 +241,7 @@ function placeTpsCamera() {
   avatar.rotation.y = controls.yaw;
   avatar.userData.animate(player.bob, player.walk);
   const sy = Math.sin(controls.yaw), cy = Math.cos(controls.yaw);
-  const y = Math.max(1.2, Math.min(4.5, TPS_HEIGHT - controls.pitch * 2));
+  const y = Math.max(1.2, Math.min(4.2, TPS_HEIGHT - controls.pitch * 2));
   let dist = TPS_DIST;
   for (let d = 0.3; d <= TPS_DIST; d += 0.1) {
     if (camBlocked(player.x + sy * d, player.z + cy * d, y)) {
@@ -290,4 +290,4 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-window.__mall = { camera, controls, player, world, catalog, openPanel, bgm };
+window.__mall = { camera, controls, player, world, catalog, openPanel, bgm, renderer };
