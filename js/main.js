@@ -261,11 +261,12 @@ function placeTpsCamera() {
 }
 
 // ---- 空中の商品カード ----
-// 近くにある商品の上に、空中に投影したようなカードを浮かべる。箱の絵だけでは何かわからないので名前と値段を出す。
-// 出すのは、近く（HOLO_RANGE以内）で、こちらを向いていて、画面に映っている商品から数枚だけ
-const HOLO_MAX = isTouch ? 3 : 4;
-const HOLO_RANGE = 3.4;
+// 商品の上に、空中に投影したようなカードを浮かべる。箱の絵だけでは何かわからないので、絵を大きく見せる。
+// 出すのは、HOLO_RANGE以内で、こちらを向いていて、画面に映っている商品から数枚だけ。遠いカードほど小さく
+const HOLO_MAX = isTouch ? 4 : 5;
+const HOLO_RANGE = 7;
 const HOLO_CELL = 2;
+const HOLO_BEAM = 22; // カードから商品へ下ろす光の線の長さ(px)
 let holoOn = true;
 const holoGrid = new Map();
 world.spots.forEach((s, i) => {
@@ -276,9 +277,10 @@ world.spots.forEach((s, i) => {
 const holoCards = Array.from({ length: HOLO_MAX }, () => {
   const el = document.createElement('div');
   el.className = 'holo';
-  el.innerHTML = '<canvas width="96" height="96"></canvas><div><div class="n"></div><div class="p"></div></div>';
+  // 名前はパッケージの絵に描いてあるので、カードには絵と値段だけを出す
+  el.innerHTML = '<canvas width="256" height="256"></canvas><div class="p"></div>';
   $('holo').appendChild(el);
-  const card = { el, spot: null, h: 0 };
+  const card = { el, spot: null, w: 0, h: 0 };
   el.addEventListener('click', () => {
     if (card.spot && controls.enabled) openPanel(catalog[card.spot.si][card.spot.pi]);
   });
@@ -286,11 +288,14 @@ const holoCards = Array.from({ length: HOLO_MAX }, () => {
 });
 const _v = new THREE.Vector3();
 let holoNext = 0;
+const holoScale = (dist) => Math.max(0.5, Math.min(1, 2.8 / dist));
 
 function chooseSpots() {
+  const cw = holoCards[0].el.offsetWidth || 160, ch = holoCards[0].el.offsetHeight || 200;
+  const R = Math.ceil(HOLO_RANGE / HOLO_CELL);
   const cx = Math.floor(player.x / HOLO_CELL), cz = Math.floor(player.z / HOLO_CELL);
   const found = [];
-  for (let gx = cx - 2; gx <= cx + 2; gx++) for (let gz = cz - 2; gz <= cz + 2; gz++) {
+  for (let gx = cx - R; gx <= cx + R; gx++) for (let gz = cz - R; gz <= cz + R; gz++) {
     for (const i of holoGrid.get(`${gx},${gz}`) || []) {
       const s = world.spots[i];
       const dx = s.x - player.x, dz = s.z - player.z;
@@ -298,8 +303,12 @@ function chooseSpots() {
       if (dist > HOLO_RANGE || dist < 0.3) continue;
       if (!s.omni && Math.sin(s.rot) * -dx + Math.cos(s.rot) * -dz <= 0) continue; // 向こうを向いている
       _v.set(s.x, s.y, s.z).project(camera);
-      if (_v.z > 1 || Math.abs(_v.x) > 0.85 || _v.y < -0.7 || _v.y > 0.75) continue;
-      found.push({ s, score: dist + Math.abs(_v.x) * 2, sx: _v.x, sy: _v.y });
+      if (_v.z > 1 || Math.abs(_v.x) > 0.85 || _v.y < -0.8 || _v.y > 0.6) continue;
+      const k = holoScale(dist);
+      found.push({
+        s, score: dist * 0.6 + Math.abs(_v.x) * 2.5,
+        px: (_v.x * 0.5 + 0.5) * innerWidth, py: (-_v.y * 0.5 + 0.5) * innerHeight, w: cw * k, h: ch * k,
+      });
     }
   }
   found.sort((a, b) => a.score - b.score);
@@ -308,7 +317,7 @@ function chooseSpots() {
     const id = f.s.si * 1000 + f.s.pi;
     if (seen.has(id)) continue;
     // 画面上でカードどうしが重ならないように離す
-    if (picked.some((p) => Math.abs(p.sx - f.sx) < 0.42 && Math.abs(p.sy - f.sy) < 0.35)) continue;
+    if (picked.some((p) => Math.abs(p.px - f.px) < (p.w + f.w) / 2 + 6 && Math.abs(p.py - f.py) < (p.h + f.h) / 2 + 6)) continue;
     seen.add(id);
     picked.push(f);
     if (picked.length === HOLO_MAX) break;
@@ -319,7 +328,7 @@ function chooseSpots() {
 function updateHolo(now) {
   const show = holoOn && controls.enabled && !panelOpen;
   if (show && now > holoNext) {
-    holoNext = now + 200;
+    holoNext = now + 250;
     const next = chooseSpots();
     // いま出ているカードはそのまま残し、空いたカードに新しい商品を割り当てる
     const keep = new Set(next);
@@ -330,13 +339,12 @@ function updateHolo(now) {
       if (!c) return;
       const p = catalog[s.si][s.pi];
       c.spot = s;
-      const cv = c.el.querySelector('canvas');
-      const ctx = cv.getContext('2d');
-      ctx.clearRect(0, 0, 96, 96);
-      drawProduct(ctx, p, 0, 0, 96);
-      c.el.querySelector('.n').textContent = p.name;
+      const ctx = c.el.querySelector('canvas').getContext('2d');
+      ctx.clearRect(0, 0, 256, 256);
+      drawProduct(ctx, p, 0, 0, 256);
+      c.el.title = p.name;
       c.el.querySelector('.p').textContent = p.priceLabel;
-      c.h = 0;
+      c.w = c.h = 0;
     });
   }
   holoCards.forEach((c, i) => {
@@ -344,15 +352,21 @@ function updateHolo(now) {
       c.el.classList.remove('on');
       return;
     }
-    _v.set(c.spot.x, c.spot.y + 0.1, c.spot.z).project(camera);
+    _v.set(c.spot.x, c.spot.y + 0.08, c.spot.z).project(camera);
     if (_v.z > 1) {
       c.el.classList.remove('on');
       return;
     }
-    if (!c.h) c.h = c.el.offsetHeight || 60;
-    const x = (_v.x * 0.5 + 0.5) * innerWidth - c.el.offsetWidth / 2;
-    const y = (-_v.y * 0.5 + 0.5) * innerHeight - c.h - 26 + Math.sin(now / 600 + i * 1.7) * 3;
-    c.el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+    if (!c.w) {
+      c.w = c.el.offsetWidth || 160;
+      c.h = c.el.offsetHeight || 200;
+    }
+    const k = holoScale(Math.hypot(c.spot.x - player.x, c.spot.z - player.z));
+    // 縮めるときはカードの下辺の中央を基準にする（CSSの transform-origin と合わせる）
+    const x = (_v.x * 0.5 + 0.5) * innerWidth - c.w / 2;
+    const y = (-_v.y * 0.5 + 0.5) * innerHeight - c.h - HOLO_BEAM * k + Math.sin(now / 600 + i * 1.7) * 3;
+    c.el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) scale(${k.toFixed(3)})`;
+    c.el.style.zIndex = String(Math.round(k * 100));
     c.el.classList.add('on');
   });
 }
