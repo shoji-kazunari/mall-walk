@@ -137,9 +137,9 @@ button.chip.off { color: var(--sub); }
   position: absolute;
   left: 0;
   top: 0;
-  width: 168px;
-  padding: 8px 8px 7px;
-  border-radius: 12px;
+  width: 240px;
+  padding: 10px 10px 8px;
+  border-radius: 14px;
   border: 1px solid rgba(130, 235, 255, 0.9);
   background:
     repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.06) 0 1px, transparent 1px 3px),
@@ -161,9 +161,9 @@ button.chip.off { color: var(--sub); }
   content: "";
   position: absolute;
   left: 50%;
-  bottom: -22px;
+  bottom: calc(-1 * var(--beam, 22px));
   width: 2px;
-  height: 22px;
+  height: var(--beam, 22px);
   margin-left: -1px;
   background: linear-gradient(rgba(130, 235, 255, 0.9), rgba(130, 235, 255, 0));
 }
@@ -175,10 +175,10 @@ button.chip.off { color: var(--sub); }
   border-radius: 8px;
   box-shadow: 0 0 10px rgba(80, 220, 255, 0.45);
 }
-.holo .p { margin-top: 5px; color: #ffe86a; font-weight: bold; font-size: 15px; text-shadow: 0 0 6px rgba(80, 220, 255, 0.6); }
+.holo .p { margin-top: 6px; color: #ffe86a; font-weight: bold; font-size: 20px; text-shadow: 0 0 6px rgba(80, 220, 255, 0.6); }
 @media (max-width: 600px) {
-  .holo { width: 124px; padding: 6px 6px 5px; font-size: 11px; }
-  .holo .p { font-size: 13px; }
+  .holo { width: 172px; padding: 7px 7px 6px; font-size: 11px; }
+  .holo .p { font-size: 16px; }
 }
 
 /* ---- 入店画面 ---- */

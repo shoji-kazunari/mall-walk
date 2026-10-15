@@ -262,9 +262,10 @@ function placeTpsCamera() {
 
 // ---- 空中の商品カード ----
 // 商品の上に、空中に投影したようなカードを浮かべる。箱の絵だけでは何かわからないので、絵を大きく見せる。
-// 出すのは、HOLO_RANGE以内で、こちらを向いていて、画面に映っている商品から数枚だけ。遠いカードほど小さく
-const HOLO_MAX = isTouch ? 4 : 5;
-const HOLO_RANGE = 7;
+// 出すのは、HOLO_RANGE以内で、こちらを向いていて、画面に映っている商品から数枚だけ。遠いカードほど小さく。
+// 画面上で重なったら、遠い方のカードを上へずらし、それでも収まらなければ隠す（毎フレーム並べ直す）
+const HOLO_MAX = isTouch ? 4 : 6;
+const HOLO_RANGE = 14;
 const HOLO_CELL = 2;
 const HOLO_BEAM = 22; // カードから商品へ下ろす光の線の長さ(px)
 let holoOn = true;
@@ -288,10 +289,9 @@ const holoCards = Array.from({ length: HOLO_MAX }, () => {
 });
 const _v = new THREE.Vector3();
 let holoNext = 0;
-const holoScale = (dist) => Math.max(0.5, Math.min(1, 2.8 / dist));
+const holoScale = (dist) => Math.max(0.55, Math.min(1, 4 / dist));
 
 function chooseSpots() {
-  const cw = holoCards[0].el.offsetWidth || 160, ch = holoCards[0].el.offsetHeight || 200;
   const R = Math.ceil(HOLO_RANGE / HOLO_CELL);
   const cx = Math.floor(player.x / HOLO_CELL), cz = Math.floor(player.z / HOLO_CELL);
   const found = [];
@@ -304,11 +304,7 @@ function chooseSpots() {
       if (!s.omni && Math.sin(s.rot) * -dx + Math.cos(s.rot) * -dz <= 0) continue; // 向こうを向いている
       _v.set(s.x, s.y, s.z).project(camera);
       if (_v.z > 1 || Math.abs(_v.x) > 0.85 || _v.y < -0.8 || _v.y > 0.6) continue;
-      const k = holoScale(dist);
-      found.push({
-        s, score: dist * 0.6 + Math.abs(_v.x) * 2.5,
-        px: (_v.x * 0.5 + 0.5) * innerWidth, py: (-_v.y * 0.5 + 0.5) * innerHeight, w: cw * k, h: ch * k,
-      });
+      found.push({ s, score: dist * 0.5 + Math.abs(_v.x) * 3, px: (_v.x * 0.5 + 0.5) * innerWidth });
     }
   }
   found.sort((a, b) => a.score - b.score);
@@ -316,8 +312,8 @@ function chooseSpots() {
   for (const f of found) {
     const id = f.s.si * 1000 + f.s.pi;
     if (seen.has(id)) continue;
-    // 画面上でカードどうしが重ならないように離す
-    if (picked.some((p) => Math.abs(p.px - f.px) < (p.w + f.w) / 2 + 6 && Math.abs(p.py - f.py) < (p.h + f.h) / 2 + 6)) continue;
+    // 同じあたりの商品ばかりにならないよう、画面の横位置を少し散らす
+    if (picked.some((p) => Math.abs(p.px - f.px) < innerWidth * 0.08)) continue;
     seen.add(id);
     picked.push(f);
     if (picked.length === HOLO_MAX) break;
@@ -347,26 +343,42 @@ function updateHolo(now) {
       c.w = c.h = 0;
     });
   }
+  // 近いカードから順に置き、先に置いたカードと重なるなら上へずらす
+  const live = [];
   holoCards.forEach((c, i) => {
-    if (!show || !c.spot) {
-      c.el.classList.remove('on');
-      return;
-    }
+    c.el.classList.remove('on');
+    if (!show || !c.spot) return;
     _v.set(c.spot.x, c.spot.y + 0.08, c.spot.z).project(camera);
-    if (_v.z > 1) {
-      c.el.classList.remove('on');
-      return;
-    }
+    if (_v.z > 1) return;
     if (!c.w) {
-      c.w = c.el.offsetWidth || 160;
-      c.h = c.el.offsetHeight || 200;
+      c.w = c.el.offsetWidth || 200;
+      c.h = c.el.offsetHeight || 240;
     }
     const k = holoScale(Math.hypot(c.spot.x - player.x, c.spot.z - player.z));
+    const px = (_v.x * 0.5 + 0.5) * innerWidth;
+    const py = (-_v.y * 0.5 + 0.5) * innerHeight + Math.sin(now / 600 + i * 1.7) * 3;
+    live.push({ c, k, px, py, w: c.w * k, h: c.h * k });
+  });
+  live.sort((a, b) => b.k - a.k);
+  const placed = [];
+  const GAP = 8;
+  live.forEach((it) => {
+    const x1 = it.px - it.w / 2, x2 = it.px + it.w / 2;
+    let bottom = it.py - HOLO_BEAM * it.k;
+    for (let tries = 0; tries < 6; tries++) {
+      const hit = placed.find((p) => x1 < p.x2 + GAP && x2 > p.x1 - GAP && bottom - it.h < p.bottom + GAP && bottom > p.top - GAP);
+      if (!hit) break;
+      bottom = hit.top - GAP;
+    }
+    const top = bottom - it.h;
+    const blocked = placed.some((p) => x1 < p.x2 + GAP && x2 > p.x1 - GAP && top < p.bottom + GAP && bottom > p.top - GAP);
+    if (blocked || top < 8) return; // 置ける場所がない
+    placed.push({ x1, x2, top, bottom });
+    const c = it.c;
     // 縮めるときはカードの下辺の中央を基準にする（CSSの transform-origin と合わせる）
-    const x = (_v.x * 0.5 + 0.5) * innerWidth - c.w / 2;
-    const y = (-_v.y * 0.5 + 0.5) * innerHeight - c.h - HOLO_BEAM * k + Math.sin(now / 600 + i * 1.7) * 3;
-    c.el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) scale(${k.toFixed(3)})`;
-    c.el.style.zIndex = String(Math.round(k * 100));
+    c.el.style.transform = `translate(${(it.px - c.w / 2).toFixed(1)}px, ${(bottom - c.h).toFixed(1)}px) scale(${it.k.toFixed(3)})`;
+    c.el.style.setProperty('--beam', `${((it.py - bottom) / it.k).toFixed(1)}px`);
+    c.el.style.zIndex = String(Math.round(it.k * 100));
     c.el.classList.add('on');
   });
 }
