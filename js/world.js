@@ -10,12 +10,12 @@ import {
 } from './art.js';
 
 export const HALL = {
-  halfW: 42,        // 側壁の x
-  halfL: 66,        // 入口と奥の壁の z
+  halfW: 30,        // 側壁の x
+  halfL: 42,        // 入口と奥の壁の z
   height: 6,        // 天井の高さ
   prom: 3,          // メインどおりの半幅
-  secTop: 54,       // ここより入口側はエントランス広場
-  secPitch: 23.2,   // 売り場ひとつの奥行き
+  secTop: 34,       // ここより入口側はエントランス広場
+  secPitch: 14.4,   // 売り場ひとつの奥行き
   perSide: 5,
 };
 
@@ -29,10 +29,10 @@ const WALL = {
   pegRows: [2.9, 2.45, 2.0, 1.55, 1.1],
 };
 const ENDCAP_DEPTH = 0.45;
-const RUNS = [[5.5, 20], [23, 37.5]]; // 売り場内の棚の列（|x| の範囲）。間が横の通路
-const ROWS = 5;
+const RUNS = [[5.5, 16], [19, 26.5]]; // 売り場内の棚の列（|x| の範囲）。間が横の通路
+const ROWS = 3;
 const ROW_PITCH = 4.0; // 棚の奥行き1.2m＋通路2.8m
-const PILLAR_X = [4.2, 21.5, 39.5];
+const PILLAR_X = [4.2, 17.5];
 const SIZE_SCALE = 1.35; // 商品の大きさ。棚の前を歩きながらでも絵柄と名前が読める大きさにする
 const ITEM_GAP = 0.06;
 const GROUP_GAP = 0.16;
@@ -111,7 +111,9 @@ class ProductLayer {
   }
   // card=true は吊り下げの台紙。正面からしか見ないので板1枚で描く（三角形の数を減らす）
   add(si, pi, x, y, z, w, h, d, rot, card = false) {
-    this.items.push({ si, pi, x, y, z, w, h, d, rot, card });
+    const it = { si, pi, x, y, z, w, h, d, rot, card };
+    this.items.push(it);
+    return it;
   }
   build(scene, catalog, renderer) {
     const meshes = [];
@@ -191,7 +193,9 @@ class SoftLayer {
     return this.plushes.length + this.balls.length;
   }
   plush(si, pi, color, x, y, z, s, rot) {
-    this.plushes.push({ x, y, z, rot, s, color: new THREE.Color(color).multiplyScalar(1 / PLUSH_TONE), owner: [si, pi] });
+    const it = { x, y, z, rot, s, color: new THREE.Color(color).multiplyScalar(1 / PLUSH_TONE), owner: [si, pi] };
+    this.plushes.push(it);
+    return it;
   }
   ball(si, pi, color, x, y, z, r) {
     this.balls.push({ x, y: y + r, z, rot: 0, s: r, color: new THREE.Color(color), owner: [si, pi] });
@@ -346,17 +350,22 @@ export function buildWorld(scene, renderer, catalog, rng) {
     }
   };
 
-  // ぬいぐるみを棚に座らせる
+  // ぬいぐるみを棚に座らせる。同じ子を2〜3体ずつ寄せて置き、組と組の間は広めに空ける
+  // （ずらっと隙間なく並べると、たくさんの目に見られているようで怖くなる）
   const shelfPlush = (f, si, y, depth, maxH) => {
-    let u = 0.1;
+    let u = rng.range(0.15, 0.5);
     while (u < f.len - 0.1) {
       const pi = rng.int(0, PRODUCTS_PER_SECTION - 1);
-      const s = Math.min(maxH, 0.3 + catalog[si][pi].size.h * 0.4);
+      const s = Math.min(maxH, 0.32 + catalog[si][pi].size.h * 0.35);
       const w = s * 0.72;
-      if (u + w > f.len - 0.1) return;
-      const [x, z] = onFace(f, u + w / 2, depth - s * 0.32);
-      soft.plush(si, pi, PLUSH_COLORS[pi % PLUSH_COLORS.length], x, y, z, s, f.rot + rng.range(-0.2, 0.2));
-      u += w + 0.08;
+      const n = rng.int(2, 3);
+      for (let k = 0; k < n; k++) {
+        if (u + w > f.len - 0.1) return;
+        const [x, z] = onFace(f, u + w / 2, depth - s * 0.32);
+        soft.plush(si, pi, PLUSH_COLORS[pi % PLUSH_COLORS.length], x, y, z, s * rng.range(0.94, 1.0), f.rot + rng.range(-0.35, 0.35));
+        u += w * 0.92;
+      }
+      u += rng.range(0.45, 0.9);
     }
   };
 
@@ -382,9 +391,10 @@ export function buildWorld(scene, renderer, catalog, rng) {
   const stock = (f, si, spec, depth) => {
     const sec = SECTIONS[si];
     const levels = sec.display === 'peg' ? [spec.levels[0]] : spec.levels;
-    levels.forEach((y) => {
+    levels.forEach((y, li) => {
       rail(f, y, depth, sec.color);
-      if (sec.display === 'plush') shelfPlush(f, si, y, depth, spec.maxItemH);
+      // ぬいぐるみ売り場は、箱入りの段とぬいぐるみの段を交互にする
+      if (sec.display === 'plush' && li % 2 === 1) shelfPlush(f, si, y, depth, spec.maxItemH);
       else shelfBoxes(f, si, y, depth, spec.maxItemH);
     });
     if (sec.display === 'peg') spec.pegRows.forEach((y) => pegRow(f, si, y));
@@ -495,13 +505,13 @@ export function buildWorld(scene, renderer, catalog, rng) {
           for (const s of [-1, 1]) fx.box(ex, GONDOLA.height / 2, zc + s * (hd + 0.02), ENDCAP_DEPTH, GONDOLA.height, 0.04, sec.color);
           fx.box(xe + dir * 0.012, GONDOLA.height / 2, zc, 0.025, GONDOLA.height, GONDOLA.depth, COLOR.frame);
           const end = makeFace(xe, zc + dir * hd, 0, -dir, dir, 0, GONDOLA.depth);
-          GONDOLA.levels.forEach((y) => {
+          GONDOLA.levels.forEach((y, li) => {
             rail(end, y, ENDCAP_DEPTH, sec.color);
-            if (sec.display === 'plush') shelfPlush(end, si, y, ENDCAP_DEPTH, GONDOLA.maxItemH);
+            if (sec.display === 'plush' && li % 2 === 1) shelfPlush(end, si, y, ENDCAP_DEPTH, GONDOLA.maxItemH);
             else shelfBoxes(end, si, y, ENDCAP_DEPTH, GONDOLA.maxItemH);
           });
           const [px, pz] = onFace(end, GONDOLA.depth / 2, 0.05);
-          const isTv = i === 2 && ri === 0 && dir === -side; // メインどおりに向いたエンド
+          const isTv = i === 1 && ri === 0 && dir === -side; // メインどおりに向いたエンド
           if (isTv) tvs.push({ si, x: px, z: pz, rot: end.rot });
           else posters[si].add(rng.int(0, 2), px, GONDOLA.height + 0.32, pz, end.rot);
           const [qx, qz] = onFace(end, 0.3, ENDCAP_DEPTH + 0.02);
@@ -543,9 +553,9 @@ export function buildWorld(scene, renderer, catalog, rng) {
 
     // 吊り看板。遠くからでも売り場がわかるように
     const big = signMesh(sec.name, sec.color, 5.6, 1.3);
-    big.position.set(side * 21.5, 4.3, r.cz);
+    big.position.set(side * 17.5, 4.3, r.cz);
     scene.add(big);
-    for (const dx of [-2.4, 2.4]) fx.box(side * 21.5 + dx, (4.95 + height) / 2, r.cz, 0.03, height - 4.95, 0.03, '#888');
+    for (const dx of [-2.4, 2.4]) fx.box(side * 17.5 + dx, (4.95 + height) / 2, r.cz, 0.03, height - 4.95, 0.03, '#888');
   });
 
   // 壁の棚の上に、在庫の箱を天井近くまで積む
@@ -593,14 +603,14 @@ export function buildWorld(scene, renderer, catalog, rng) {
     fill(cx, cz, BX, BZ, BH);
   };
   const plushPile = (si) => (cx, cz, BX, BZ, BH) => {
-    for (let layer = 0; layer < 4; layer++) {
-      const n = layer < 2 ? 12 : layer === 2 ? 8 : 4;
+    for (let layer = 0; layer < 3; layer++) {
+      const n = [7, 5, 2][layer];
       for (let k = 0; k < n; k++) {
         const pi = rng.int(0, PRODUCTS_PER_SECTION - 1);
         const shrink = 1 - layer * 0.18;
         const x = cx + rng.range(-BX / 2 + 0.18, BX / 2 - 0.18) * shrink;
         const z = cz + rng.range(-BZ / 2 + 0.16, BZ / 2 - 0.16) * shrink;
-        soft.plush(si, pi, PLUSH_COLORS[pi % PLUSH_COLORS.length], x, 0.08 + layer * 0.22, z, rng.range(0.3, 0.42), rng.range(0, Math.PI * 2));
+        soft.plush(si, pi, PLUSH_COLORS[pi % PLUSH_COLORS.length], x, 0.08 + layer * 0.22, z, rng.range(0.3, 0.42), rng.range(0, Math.PI * 2)).omni = true;
       }
     }
   };
@@ -632,7 +642,7 @@ export function buildWorld(scene, renderer, catalog, rng) {
         for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
           const si = sis[(i + j + n) % 2];
           const x = (i - (n - 1) / 2) * cell, z = cz + (j - (n - 1) / 2) * cell;
-          products.add(si, rng.int(0, PRODUCTS_PER_SECTION - 1), x, y, z, cell * 0.94, h, cell * 0.94, rng.int(0, 3) * Math.PI / 2);
+          products.add(si, rng.int(0, PRODUCTS_PER_SECTION - 1), x, y, z, cell * 0.94, h, cell * 0.94, rng.int(0, 3) * Math.PI / 2).omni = true;
         }
         y += h;
       });
@@ -678,9 +688,15 @@ export function buildWorld(scene, renderer, catalog, rng) {
   });
   const pickables = [...products.build(scene, catalog, renderer), ...soft.build(scene)];
 
+  // 空中の商品カードを出す位置。商品の上端と、正面の向き（omni はどちらからでも見える）
+  const spots = [
+    ...products.items.filter((it) => it.y < WALL.height).map((it) => ({ si: it.si, pi: it.pi, x: it.x, y: it.y + it.h, z: it.z, rot: it.rot, omni: !!it.omni })),
+    ...soft.plushes.map((it) => ({ si: it.owner[0], pi: it.owner[1], x: it.x, y: it.y + it.s * 1.0, z: it.z, rot: it.rot, omni: !!it.omni })),
+  ];
+
   const bounds = {
     x1: -halfW + WALL.depth, x2: halfW - WALL.depth,
     z1: -halfL + WALL.depth, z2: halfL,
   };
-  return { colliders, pickables, bounds, minimap, productCount: products.items.length + soft.count };
+  return { colliders, pickables, bounds, minimap, spots, productCount: products.items.length + soft.count };
 }

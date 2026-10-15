@@ -192,7 +192,7 @@ const d = new Date();
 $('today').textContent = `${d.getMonth() + 1}月${d.getDate()}日の品ぞろえ：${SECTIONS.length}売り場・${SECTIONS.length * PRODUCTS_PER_SECTION}種類・棚に${world.productCount.toLocaleString('ja-JP')}個`;
 $('howto').innerHTML = isTouch
   ? '画面の<b>左側をなぞる</b>と歩く／<b>右側をなぞる</b>と見回す<br>近くの商品を<b>タップ</b>すると手に取れます'
-  : '<b>WASD・矢印キー</b>で歩く（Shiftで早歩き）／<b>マウス</b>で見回す<br>近くの商品を<b>クリック</b>すると手に取れます<br><b>V</b>で視点の切りかえ／<b>M</b>でBGMのオン・オフ';
+  : '<b>WASD・矢印キー</b>で歩く（Shiftで早歩き）／<b>マウス</b>で見回す<br>近くの商品を<b>クリック</b>すると手に取れます<br><b>V</b>で視点の切りかえ／<b>C</b>で商品カード／<b>M</b>でBGM';
 
 function toggleView() {
   tps = !tps;
@@ -205,12 +205,19 @@ function toggleBgm() {
   $('btn-bgm').textContent = on ? 'BGM オン' : 'BGM オフ';
   $('btn-bgm').classList.toggle('off', !on);
 }
+function toggleHolo() {
+  holoOn = !holoOn;
+  $('btn-holo').textContent = holoOn ? 'カード オン' : 'カード オフ';
+  $('btn-holo').classList.toggle('off', !holoOn);
+}
 $('btn-view').addEventListener('click', toggleView);
+$('btn-holo').addEventListener('click', toggleHolo);
 $('btn-bgm').addEventListener('click', toggleBgm);
 addEventListener('keydown', (e) => {
   if (!controls.enabled) return;
   if (e.code === 'KeyV') toggleView();
   if (e.code === 'KeyM') toggleBgm();
+  if (e.code === 'KeyC') toggleHolo();
 });
 
 $('enter').addEventListener('click', () => {
@@ -253,6 +260,103 @@ function placeTpsCamera() {
   camera.lookAt(player.x - sy * 2.5, 1.0 + controls.pitch * 2.5, player.z - cy * 2.5);
 }
 
+// ---- 空中の商品カード ----
+// 近くにある商品の上に、空中に投影したようなカードを浮かべる。箱の絵だけでは何かわからないので名前と値段を出す。
+// 出すのは、近く（HOLO_RANGE以内）で、こちらを向いていて、画面に映っている商品から数枚だけ
+const HOLO_MAX = isTouch ? 3 : 4;
+const HOLO_RANGE = 3.4;
+const HOLO_CELL = 2;
+let holoOn = true;
+const holoGrid = new Map();
+world.spots.forEach((s, i) => {
+  const key = `${Math.floor(s.x / HOLO_CELL)},${Math.floor(s.z / HOLO_CELL)}`;
+  if (!holoGrid.has(key)) holoGrid.set(key, []);
+  holoGrid.get(key).push(i);
+});
+const holoCards = Array.from({ length: HOLO_MAX }, () => {
+  const el = document.createElement('div');
+  el.className = 'holo';
+  el.innerHTML = '<canvas width="96" height="96"></canvas><div><div class="n"></div><div class="p"></div></div>';
+  $('holo').appendChild(el);
+  const card = { el, spot: null, h: 0 };
+  el.addEventListener('click', () => {
+    if (card.spot && controls.enabled) openPanel(catalog[card.spot.si][card.spot.pi]);
+  });
+  return card;
+});
+const _v = new THREE.Vector3();
+let holoNext = 0;
+
+function chooseSpots() {
+  const cx = Math.floor(player.x / HOLO_CELL), cz = Math.floor(player.z / HOLO_CELL);
+  const found = [];
+  for (let gx = cx - 2; gx <= cx + 2; gx++) for (let gz = cz - 2; gz <= cz + 2; gz++) {
+    for (const i of holoGrid.get(`${gx},${gz}`) || []) {
+      const s = world.spots[i];
+      const dx = s.x - player.x, dz = s.z - player.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > HOLO_RANGE || dist < 0.3) continue;
+      if (!s.omni && Math.sin(s.rot) * -dx + Math.cos(s.rot) * -dz <= 0) continue; // 向こうを向いている
+      _v.set(s.x, s.y, s.z).project(camera);
+      if (_v.z > 1 || Math.abs(_v.x) > 0.85 || _v.y < -0.7 || _v.y > 0.75) continue;
+      found.push({ s, score: dist + Math.abs(_v.x) * 2, sx: _v.x, sy: _v.y });
+    }
+  }
+  found.sort((a, b) => a.score - b.score);
+  const picked = [], seen = new Set();
+  for (const f of found) {
+    const id = f.s.si * 1000 + f.s.pi;
+    if (seen.has(id)) continue;
+    // 画面上でカードどうしが重ならないように離す
+    if (picked.some((p) => Math.abs(p.sx - f.sx) < 0.42 && Math.abs(p.sy - f.sy) < 0.35)) continue;
+    seen.add(id);
+    picked.push(f);
+    if (picked.length === HOLO_MAX) break;
+  }
+  return picked.map((f) => f.s);
+}
+
+function updateHolo(now) {
+  const show = holoOn && controls.enabled && !panelOpen;
+  if (show && now > holoNext) {
+    holoNext = now + 200;
+    const next = chooseSpots();
+    // いま出ているカードはそのまま残し、空いたカードに新しい商品を割り当てる
+    const keep = new Set(next);
+    holoCards.forEach((c) => { if (c.spot && !keep.has(c.spot)) c.spot = null; });
+    next.forEach((s) => {
+      if (holoCards.some((c) => c.spot === s)) return;
+      const c = holoCards.find((card) => !card.spot);
+      if (!c) return;
+      const p = catalog[s.si][s.pi];
+      c.spot = s;
+      const cv = c.el.querySelector('canvas');
+      const ctx = cv.getContext('2d');
+      ctx.clearRect(0, 0, 96, 96);
+      drawProduct(ctx, p, 0, 0, 96);
+      c.el.querySelector('.n').textContent = p.name;
+      c.el.querySelector('.p').textContent = p.priceLabel;
+      c.h = 0;
+    });
+  }
+  holoCards.forEach((c, i) => {
+    if (!show || !c.spot) {
+      c.el.classList.remove('on');
+      return;
+    }
+    _v.set(c.spot.x, c.spot.y + 0.1, c.spot.z).project(camera);
+    if (_v.z > 1) {
+      c.el.classList.remove('on');
+      return;
+    }
+    if (!c.h) c.h = c.el.offsetHeight || 60;
+    const x = (_v.x * 0.5 + 0.5) * innerWidth - c.el.offsetWidth / 2;
+    const y = (-_v.y * 0.5 + 0.5) * innerHeight - c.h - 26 + Math.sin(now / 600 + i * 1.7) * 3;
+    c.el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+    c.el.classList.add('on');
+  });
+}
+
 // ---- ループ ----
 let last = performance.now();
 let lastPlace = null;
@@ -284,6 +388,7 @@ function frame(now) {
     if (lastPlace !== null && place >= 0) toast(`${SECTIONS[place].name}売り場`);
     lastPlace = place;
   }
+  updateHolo(now);
   drawMap();
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
